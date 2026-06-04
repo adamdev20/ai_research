@@ -4,119 +4,119 @@ import feedparser
 from google import genai
 
 # =========================
-# LOAD SECRETS
+# CONFIG (SECRET FROM GITHUB)
 # =========================
 
 WEBHOOK_URL = os.environ["DISCORD_WEBHOOK"]
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 
-# =========================
-# GEMINI CLIENT
-# =========================
-
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 # =========================
-# RSS NEWS SOURCES
+# RSS SOURCES
 # =========================
 
 rss_sources = [
     "https://rss.cnn.com/rss/money_latest.rss",
-    "https://feeds.bbci.co.uk/news/business/rss.xml"
+    "https://feeds.bbci.co.uk/news/business/rss.xml",
+    "https://finance.yahoo.com/news/rssindex"
 ]
 
 # =========================
-# COLLECT NEWS
+# COLLECT NEWS (WITH LINKS)
 # =========================
 
-news_titles = []
+news_items = []
 
 for rss in rss_sources:
     feed = feedparser.parse(rss)
 
     for item in feed.entries[:5]:
-        news_titles.append(item.title)
+        news_items.append({
+            "title": item.title,
+            "link": item.link
+        })
 
-news_text = "\n".join(news_titles)
+news_text = "\n".join(
+    [f"{n['title']} - {n['link']}" for n in news_items]
+)
 
 # =========================
-# AI PROMPT
+# PROMPT (FINAL INTELLIGENCE VERSION)
 # =========================
 
 prompt = f"""
-Anda adalah seorang analis investasi makro global senior yang bekerja di perusahaan manajemen investasi tingkat institusi.
+Anda adalah analis investasi makro global senior di institusi keuangan.
 
-Tugas Anda adalah mengubah berita mentah menjadi INTELIJEN INVESTASI yang terstruktur dan mudah dipahami.
+Tugas Anda adalah mengubah berita menjadi INTELIJEN INVESTASI yang mendalam dan terstruktur.
 
-JANGAN merangkum berita. JANGAN mengulang isi berita.
+JANGAN merangkum berita secara biasa.
 
-Fokus pada analisis, dampak, dan insight.
+Gunakan analisis, konteks, hubungan antar peristiwa, dan dampak pasar.
 
 ---
 
 FORMAT OUTPUT:
 
-1. SENTIMEN PASAR
-Berikan:
-- Sentimen umum: Bullish / Netral / Bearish
-- Skor (0–100)
-- Penjelasan singkat
+1. RINGKASAN KONDISI PASAR
+Jelaskan kondisi pasar global saat ini secara singkat dan jelas.
 
 ---
 
-2. DAMPAK MAKRO GLOBAL
-Analisis dampak terhadap:
-- ekonomi global
-- inflasi dan suku bunga
-- sentimen risiko investor
+2. ANALISIS MENDALAM (CORE INSIGHT)
+Jelaskan:
+- kenapa berita ini penting
+- dampak tersembunyi
+- hubungan antar berita
+- dampak jangka pendek dan panjang
 
 ---
 
-3. DAMPAK SEKTOR
-Bagi menjadi:
+3. DAMPAK KE SEKTOR
 - Sektor yang diuntungkan
 - Sektor yang tertekan
-
-Sebutkan sektor secara spesifik (contoh: teknologi, energi, keuangan, AI, dll)
+- alasan logis
 
 ---
 
-4. TEMA INVESTASI YANG MUNCUL
-Identifikasi 2–4 tema besar yang sedang berkembang di pasar.
-Jelaskan secara singkat alasan munculnya tema tersebut.
+4. TEMA INVESTASI GLOBAL
+Identifikasi 2–4 tren besar yang sedang terbentuk di pasar.
 
 ---
 
 5. RISIKO UTAMA
-Jelaskan risiko penting yang perlu diperhatikan, seperti:
-- risiko ekonomi
-- risiko geopolitik
-- risiko valuasi pasar
-- risiko sistemik
+Jelaskan risiko utama yang mungkin tidak disadari investor umum.
 
 ---
 
-6. AREA PELUANG (tanpa rekomendasi beli/jual)
-Sebutkan sektor atau tren yang layak dipelajari lebih lanjut.
-Berikan alasan singkat mengapa menarik.
+6. ARAH STRATEGIS (NON-REKOMENDASI)
+Sebutkan:
+- apa yang harus dipantau
+- data penting yang perlu diperhatikan
+- sektor untuk observasi
 
 ---
 
-7. INSIGHT UTAMA
-Berikan satu insight mendalam yang tidak terlihat oleh investor pemula.
+7. LANGKAH SELANJUTNYA
+Berikan action plan sederhana:
+- apa yang harus dilihat besok
+- indikator penting
+- fokus analisis berikutnya
 
 ---
 
-DATA BERITA:
+8. SUMBER BERITA
+Gunakan link berikut sebagai referensi:
 {news_text}
 
 ---
 
-Gunakan bahasa Indonesia yang profesional, jelas, dan ringkas seperti laporan riset institusi keuangan.
+Gunakan Bahasa Indonesia yang profesional, jelas, dan seperti laporan riset institusi keuangan.
+Jangan gunakan emoji berlebihan.
 """
 
 # =========================
-# GENERATE SUMMARY
+# GEMINI RESPONSE
 # =========================
 
 response = client.models.generate_content(
@@ -124,11 +124,14 @@ response = client.models.generate_content(
     contents=prompt
 )
 
-summary = response.text
+report = response.text
 
-# Discord limit ~2000 chars
-if len(summary) > 1900:
-    summary = summary[:1900]
+# =========================
+# DISCORD LIMIT SAFETY
+# =========================
+
+if len(report) > 1900:
+    report = report[:1900]
 
 # =========================
 # SEND TO DISCORD
@@ -136,7 +139,7 @@ if len(summary) > 1900:
 
 requests.post(
     WEBHOOK_URL,
-    json={"content": summary}
+    json={"content": report}
 )
 
 print("Report sent successfully")

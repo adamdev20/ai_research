@@ -29,15 +29,23 @@ rss_sources = [
 news_items = []
 
 for rss in rss_sources:
-    feed = feedparser.parse(rss)
+    try:
+        feed = feedparser.parse(rss)
 
-    for item in feed.entries[:5]:
-        news_items.append(f"{item.title} - {item.link}")
+        for item in feed.entries[:5]:
+            news_items.append(f"{item.title} - {item.link}")
+
+    except:
+        continue
+
+# fallback kalau kosong
+if not news_items:
+    news_items.append("No market news available today.")
 
 news_text = "\n".join(news_items)
 
 # =========================
-# PROMPT (SNYDER RESEARCH OS)
+# PROMPT
 # =========================
 
 prompt = f"""
@@ -57,63 +65,24 @@ Hindari:
 - penjelasan terlalu panjang
 - prediksi pasti
 
-Gunakan logika sederhana seperti mentor yang menjelaskan ke pemula.
-
 ---
 
 INPUT:
 Berikut adalah kumpulan berita pasar terbaru:
 
-{NEWS_DATA}
+{news_text}
 
 ---
 
 OUTPUT WAJIB:
 
 1. KONDISI PASAR HARI INI
-Jelaskan secara sederhana:
-- pasar cenderung naik, turun, atau tidak jelas
-- alasan utama dalam 2–4 kalimat
-
----
-
 2. HAL PALING PENTING HARI INI
-Ambil 2–3 poin yang benar-benar mempengaruhi pasar.
-Abaikan hal yang tidak penting.
-
----
-
 3. ARTINYA UNTUK INVESTOR PEMULA
-Jelaskan:
-- apakah kondisi ini cenderung aman atau berisiko
-- aset atau sektor apa yang biasanya terpengaruh (contoh sederhana)
-
----
-
 4. SIKAP YANG MASUK AKAL HARI INI
-Berikan arahan sederhana seperti:
-- “lebih baik tunggu dulu”
-- “boleh tetap pegang aset”
-- “hati-hati jika ingin tambah posisi”
-- “tidak perlu panik”
-
-(Jangan beri instruksi beli/jual spesifik)
-
----
-
 5. RISIKO UTAMA HARI INI
-Jelaskan 1–3 risiko yang bisa mengubah kondisi pasar secara tiba-tiba.
 
----
-
-GAYA PENULISAN:
-- seperti mentor ke pemula
-- tenang, tidak menakutkan
-- tidak terlalu formal
-- mudah dipahami dalam sekali baca
-
-Tujuan utama:
-membantu pengguna mengambil keputusan lebih tenang dan masuk akal setiap hari.
+Gunakan bahasa seperti mentor yang menjelaskan ke pemula.
 """
 
 # =========================
@@ -128,7 +97,7 @@ response = client.models.generate_content(
 report = response.text
 
 # =========================
-# DISCORD SENDER (ANTI LIMIT)
+# DISCORD SENDER (SAFE)
 # =========================
 
 def send_discord(text):

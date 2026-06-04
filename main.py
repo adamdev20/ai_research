@@ -4,7 +4,7 @@ import feedparser
 from google import genai
 
 # =========================
-# CONFIG (SECRET FROM GITHUB)
+# CONFIG
 # =========================
 
 WEBHOOK_URL = os.environ["DISCORD_WEBHOOK"]
@@ -23,7 +23,7 @@ rss_sources = [
 ]
 
 # =========================
-# COLLECT NEWS (WITH LINKS)
+# COLLECT NEWS
 # =========================
 
 news_items = []
@@ -37,86 +37,101 @@ for rss in rss_sources:
             "link": item.link
         })
 
-news_text = "\n".join(
-    [f"{n['title']} - {n['link']}" for n in news_items]
-)
+news_text = "\n".join([f"{n['title']} - {n['link']}" for n in news_items])
 
 # =========================
-# PROMPT (FINAL INTELLIGENCE VERSION)
+# HEDGE FUND OS PROMPT
 # =========================
 
 prompt = f"""
-Anda adalah analis investasi makro global senior di institusi keuangan.
+Anda adalah AI Hedge Fund Operating System (Hedge Fund OS v1).
 
-Tugas Anda adalah mengubah berita menjadi INTELIJEN INVESTASI yang mendalam dan terstruktur.
+Anda bertugas sebagai sistem intelijen pasar real-time untuk investor institusional.
 
-JANGAN merangkum berita secara biasa.
-
-Gunakan analisis, konteks, hubungan antar peristiwa, dan dampak pasar.
+Anda TIDAK merangkum berita.
+Anda MENYULAP data menjadi keputusan strategis.
 
 ---
 
 FORMAT OUTPUT:
 
-1. RINGKASAN KONDISI PASAR
-Jelaskan kondisi pasar global saat ini secara singkat dan jelas.
+1. MARKET STATE (KONDISI PASAR SAAT INI)
+- Jelaskan kondisi global market saat ini dalam 3-5 kalimat
 
 ---
 
-2. ANALISIS MENDALAM (CORE INSIGHT)
+2. MARKET REGIME DETECTION
+Tentukan market sedang berada di:
+- Risk On
+- Risk Off
+- Transition Phase
+
+Jelaskan alasannya.
+
+---
+
+3. SENTIMENT SCORING (0–100)
+- Bullish %
+- Bearish %
+- Netral %
+Sertakan logika singkat.
+
+---
+
+4. NARRATIVE SHIFT (PERUBAHAN CERITA PASAR)
 Jelaskan:
-- kenapa berita ini penting
-- dampak tersembunyi
-- hubungan antar berita
-- dampak jangka pendek dan panjang
+- Narasi lama
+- Narasi baru
+- Apa yang sedang berubah di mindset investor global
 
 ---
 
-3. DAMPAK KE SEKTOR
-- Sektor yang diuntungkan
-- Sektor yang tertekan
-- alasan logis
+5. SECTOR ROTATION MAP
+- Momentum sectors
+- Early accumulation sectors
+- High risk / overheated sectors
 
 ---
 
-4. TEMA INVESTASI GLOBAL
-Identifikasi 2–4 tren besar yang sedang terbentuk di pasar.
+6. MARKET OPPORTUNITY SCORE (TOP 3 THEMES)
+Berikan 3 tema terbesar dengan skor (0–100):
+Contoh:
+- AI infrastructure (85/100)
+- Energy transition (70/100)
 
 ---
 
-5. RISIKO UTAMA
-Jelaskan risiko utama yang mungkin tidak disadari investor umum.
+7. RISK RADAR (SISTEMIK & TERSEMBUNYI)
+Jelaskan risiko yang tidak terlihat oleh retail investor.
 
 ---
 
-6. ARAH STRATEGIS (NON-REKOMENDASI)
-Sebutkan:
-- apa yang harus dipantau
-- data penting yang perlu diperhatikan
-- sektor untuk observasi
+8. SCENARIO MATRIX
+- Bull case
+- Base case
+- Bear case
 
 ---
 
-7. LANGKAH SELANJUTNYA
-Berikan action plan sederhana:
-- apa yang harus dilihat besok
+9. NEXT ACTION FRAMEWORK
+Apa yang harus dipantau:
+- data ekonomi
+- event global
 - indikator penting
-- fokus analisis berikutnya
+- sektor yang harus diamati
 
 ---
 
-8. SUMBER BERITA
-Gunakan link berikut sebagai referensi:
+10. NEWS INPUT
 {news_text}
 
 ---
 
-Gunakan Bahasa Indonesia yang profesional, jelas, dan seperti laporan riset institusi keuangan.
-Jangan gunakan emoji berlebihan.
+Gunakan Bahasa Indonesia profesional, tajam, seperti laporan hedge fund real.
+Hindari emoji berlebihan.
 """
-
 # =========================
-# GEMINI RESPONSE
+# GEMINI CALL
 # =========================
 
 response = client.models.generate_content(
@@ -127,19 +142,19 @@ response = client.models.generate_content(
 report = response.text
 
 # =========================
-# DISCORD LIMIT SAFETY
+# DISCORD SENDER (ANTI LIMIT)
 # =========================
 
-if len(report) > 1900:
-    report = report[:1900]
+def send_discord(text):
+    chunks = [text[i:i+1900] for i in range(0, len(text), 1900)]
 
-# =========================
-# SEND TO DISCORD
-# =========================
+    for i, chunk in enumerate(chunks):
+        header = f"HEDGE FUND OS | PART {i+1}/{len(chunks)}\n"
+        requests.post(
+            WEBHOOK_URL,
+            json={"content": header + chunk}
+        )
 
-requests.post(
-    WEBHOOK_URL,
-    json={"content": report}
-)
+send_discord(report)
 
-print("Report sent successfully")
+print("Hedge Fund OS report sent successfully")

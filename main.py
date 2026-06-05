@@ -56,7 +56,7 @@ def gemini_generate(prompt, max_tokens=1000, retries=3, delay=15):
    for attempt in range(retries):
        try:
            response = client.models.generate_content(
-               model="gemini-1.5-flash",
+               model="gemini-2.0-flash",
                contents=prompt,
                config={"max_output_tokens": max_tokens}
            )

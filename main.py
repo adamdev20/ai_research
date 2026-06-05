@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import requests
 import feedparser
 from datetime import datetime
@@ -46,6 +47,27 @@ def load_memory():
 def save_memory(data):
    with open(MEMORY_FILE, "w") as f:
        json.dump(data, f, indent=2, ensure_ascii=False)
+
+# =========================
+# GEMINI WRAPPER WITH RETRY
+# =========================
+
+def gemini_generate(prompt, max_tokens=1000, retries=3, delay=15):
+   for attempt in range(retries):
+       try:
+           response = client.models.generate_content(
+               model="gemini-1.5-flash",
+               contents=prompt,
+               config={"max_output_tokens": max_tokens}
+           )
+           return response
+       except Exception as e:
+           print(f"⚠️ Gemini error attempt {attempt+1}/{retries}: {e}")
+           if attempt < retries - 1:
+               print(f"⏳ Retry dalam {delay} detik...")
+               time.sleep(delay)
+           else:
+               raise
 
 # =========================
 # TOOL: Fetch News
@@ -108,7 +130,6 @@ def format_news(relevant, general):
 
 # =========================
 # TOOL: Macro Sentiment Score
-# Upgrade: AI menilai skor sentimen makro 1-10
 # =========================
 
 def agent_macro_score(news_text):
@@ -125,11 +146,7 @@ Jawab JSON saja:
  "alasan": "1 kalimat singkat"
 }}
 """
-   response = client.models.generate_content(
-       model="gemini-2.5-flash",
-       contents=prompt,
-       config={"max_output_tokens": 300}
-   )
+   response = gemini_generate(prompt, max_tokens=300)
    try:
        clean = response.text.strip().replace("```json", "").replace("```", "")
        return json.loads(clean)
@@ -169,17 +186,13 @@ Jawab JSON saja:
  "fokus_hari_ini": "...",
  "saham_prioritas": ["KODE1", "KODE2", "KODE3"],
  "kondisi_vs_kemarin": "lebih baik / sama / lebih buruk",
- "ada_risiko_baru": true/false,
+ "ada_risiko_baru": true,
  "risiko_baru": "...",
  "rekomendasi_sektor": "DEFENSIF / GROWTH / MIXED",
  "alasan_sektor": "..."
 }}
 """
-   response = client.models.generate_content(
-       model="gemini-2.5-flash",
-       contents=prompt,
-       config={"max_output_tokens": 1000}
-   )
+   response = gemini_generate(prompt, max_tokens=1000)
    try:
        clean = response.text.strip().replace("```json", "").replace("```", "")
        return json.loads(clean)
@@ -221,7 +234,7 @@ Jawab JSON saja:
  "KODE": {{
    "dampak_pendek": "...",
    "dampak_menengah": "...",
-   "ubah_thesis": true/false,
+   "ubah_thesis": true,
    "penjelasan_thesis": "...",
    "confidence": "TINGGI/SEDANG/RENDAH",
    "sentimen": "positif/negatif/netral",
@@ -229,11 +242,7 @@ Jawab JSON saja:
  }}
 }}
 """
-   response = client.models.generate_content(
-       model="gemini-2.5-flash",
-       contents=prompt,
-       config={"max_output_tokens": 2000}
-   )
+   response = gemini_generate(prompt, max_tokens=2000)
    try:
        clean = response.text.strip().replace("```json", "").replace("```", "")
        return json.loads(clean)
@@ -249,7 +258,6 @@ def agent_final_report(news_text, plan, deep_analysis, macro, memory, today):
    yesterday_sentiment = memory.get("overall_sentiment", "tidak ada data kemarin")
    prev_score = memory.get("macro_score", "-")
 
-   # Emoji sentimen makro
    skor = macro.get("skor", 5)
    if skor >= 7:
        macro_emoji = "🟢"
@@ -336,11 +344,7 @@ PENTING:
 - Jangan prediksi harga pasti
 """
 
-   response = client.models.generate_content(
-       model="gemini-2.5-flash",
-       contents=prompt,
-       config={"max_output_tokens": 8192}
-   )
+   response = gemini_generate(prompt, max_tokens=8192)
    return response.text
 
 # =========================

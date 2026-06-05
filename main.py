@@ -4,7 +4,6 @@ import requests
 import feedparser
 from datetime import datetime
 from google import genai
-from google.genai import types
 
 # =========================
 # CONFIG
@@ -33,7 +32,7 @@ BLUE_CHIP_SAHAM = {
 }
 
 # =========================
-# MEMORY — simpan data kemarin
+# MEMORY
 # =========================
 
 MEMORY_FILE = "market_memory.json"
@@ -46,10 +45,10 @@ def load_memory():
 
 def save_memory(data):
    with open(MEMORY_FILE, "w") as f:
-       json.dump(data, f, indent=2)
+       json.dump(data, f, indent=2, ensure_ascii=False)
 
 # =========================
-# TOOL: Ambil berita RSS
+# TOOL: Fetch News
 # =========================
 
 def fetch_news():
@@ -77,14 +76,15 @@ def fetch_news():
    return news_items if news_items else [{"title": "No news available", "link": "", "source": ""}]
 
 # =========================
-# TOOL: Cek apakah berita relevan ke saham tertentu
+# TOOL: Filter News
 # =========================
 
-def filter_relevant_news(news_items, saham_list):
-   keywords = list(saham_list.keys()) + list(saham_list.values()) + [
+def filter_relevant_news(news_items):
+   keywords = list(BLUE_CHIP_SAHAM.keys()) + list(BLUE_CHIP_SAHAM.values()) + [
        "bank", "telkom", "astra", "rupiah", "ihsg", "bi rate",
        "inflasi", "ekspor", "impor", "ojk", "bei", "saham",
-       "dividen", "laba", "pendapatan", "ekonomi indonesia"
+       "dividen", "laba", "pendapatan", "ekonomi indonesia",
+       "suku bunga", "fed", "dollar", "komoditas", "minyak"
    ]
 
    relevant = []
@@ -99,68 +99,87 @@ def filter_relevant_news(news_items, saham_list):
 
    return relevant, general
 
-# =========================
-# TOOL: Format berita untuk prompt
-# =========================
-
 def format_news(relevant, general):
-   text = "=== BERITA RELEVAN SAHAM INDONESIA ===\n"
-   if relevant:
-       for item in relevant:
-           text += f"- [{item['source']}] {item['title']}\n"
-   else:
-       text += "Tidak ada berita spesifik hari ini.\n"
-
-   text += "\n=== BERITA PASAR GLOBAL ===\n"
-   for item in general[:5]:
-       text += f"- [{item['source']}] {item['title']}\n"
-
+   text = "=== BERITA RELEVAN ===\n"
+   text += "\n".join([f"- [{i['source']}] {i['title']}" for i in relevant]) if relevant else "Tidak ada berita spesifik.\n"
+   text += "\n\n=== BERITA GLOBAL ===\n"
+   text += "\n".join([f"- [{i['source']}] {i['title']}" for i in general[:6]])
    return text
 
 # =========================
+# TOOL: Macro Sentiment Score
+# Upgrade: AI menilai skor sentimen makro 1-10
+# =========================
+
+def agent_macro_score(news_text):
+   prompt = f"""
+Berikan skor sentimen makro ekonomi hari ini dari 1-10.
+1 = sangat bearish, 10 = sangat bullish.
+
+Berita: {news_text}
+
+Jawab JSON saja:
+{{
+ "skor": 7,
+ "label": "Bullish / Netral / Bearish",
+ "alasan": "1 kalimat singkat"
+}}
+"""
+   response = client.models.generate_content(
+       model="gemini-2.5-flash",
+       contents=prompt,
+       config={"max_output_tokens": 300}
+   )
+   try:
+       clean = response.text.strip().replace("```json", "").replace("```", "")
+       return json.loads(clean)
+   except:
+       return {"skor": 5, "label": "Netral", "alasan": "Data tidak cukup untuk penilaian."}
+
+# =========================
 # AGENTIC STEP 1: Planning
-# Gemini memutuskan sendiri fokus analisis hari ini
 # =========================
 
 def agent_plan(news_text, memory):
    yesterday = memory.get("last_report_date", "tidak ada data")
    prev_risks = memory.get("top_risks", "tidak ada data")
    prev_sentiment = memory.get("overall_sentiment", "tidak ada data")
+   prev_score = memory.get("macro_score", "tidak ada data")
 
-   plan_prompt = f"""
+   prompt = f"""
 Kamu adalah agentic AI analis saham BEI.
 
-Konteks dari laporan kemarin ({yesterday}):
-- Sentimen keseluruhan: {prev_sentiment}
-- Risiko utama yang dipantau: {prev_risks}
+Data kemarin ({yesterday}):
+- Sentimen: {prev_sentiment}
+- Skor makro: {prev_score}/10
+- Risiko: {prev_risks}
 
 Berita hari ini:
 {news_text}
 
 Tugasmu:
-1. Tentukan FOKUS UTAMA analisis hari ini (sektor apa yang paling perlu diperhatikan?)
-2. Tentukan 3 saham prioritas yang perlu analisis LEBIH DALAM hari ini
-3. Tentukan apakah kondisi hari ini LEBIH BAIK, SAMA, atau LEBIH BURUK dari kemarin
-4. Identifikasi apakah ada RISIKO BARU yang muncul dibanding kemarin
+1. Tentukan fokus utama analisis hari ini
+2. Pilih 3 saham prioritas yang paling terdampak berita
+3. Nilai kondisi vs kemarin
+4. Deteksi risiko baru jika ada
+5. Berikan rekomendasi sektor: DEFENSIF / GROWTH / MIXED
 
-Jawab dalam format JSON:
+Jawab JSON saja:
 {{
  "fokus_hari_ini": "...",
  "saham_prioritas": ["KODE1", "KODE2", "KODE3"],
  "kondisi_vs_kemarin": "lebih baik / sama / lebih buruk",
  "ada_risiko_baru": true/false,
- "risiko_baru": "..."
+ "risiko_baru": "...",
+ "rekomendasi_sektor": "DEFENSIF / GROWTH / MIXED",
+ "alasan_sektor": "..."
 }}
-
-Hanya jawab JSON, tidak ada teks lain.
 """
-
    response = client.models.generate_content(
        model="gemini-2.5-flash",
-       contents=plan_prompt,
+       contents=prompt,
        config={"max_output_tokens": 1000}
    )
-
    try:
        clean = response.text.strip().replace("```json", "").replace("```", "")
        return json.loads(clean)
@@ -170,50 +189,51 @@ Hanya jawab JSON, tidak ada teks lain.
            "saham_prioritas": ["BBCA", "BBRI", "TLKM"],
            "kondisi_vs_kemarin": "sama",
            "ada_risiko_baru": False,
-           "risiko_baru": ""
+           "risiko_baru": "",
+           "rekomendasi_sektor": "MIXED",
+           "alasan_sektor": "Data tidak cukup."
        }
 
 # =========================
 # AGENTIC STEP 2: Deep Analysis
-# Analisis mendalam untuk saham prioritas
 # =========================
 
 def agent_deep_analysis(saham_prioritas, news_text):
    saham_info = {k: v for k, v in BLUE_CHIP_SAHAM.items() if k in saham_prioritas}
    saham_str = ", ".join([f"{k} ({v})" for k, v in saham_info.items()])
 
-   deep_prompt = f"""
-Kamu adalah analis saham senior. Lakukan analisis MENDALAM untuk saham prioritas hari ini.
+   prompt = f"""
+Analisis mendalam untuk saham prioritas hari ini.
 
-Saham prioritas: {saham_str}
-Berita relevan: {news_text}
+Saham: {saham_str}
+Berita: {news_text}
 
-Untuk setiap saham, analisis:
-1. Dampak berita jangka pendek (hari ini - 1 minggu)
-2. Dampak berita jangka menengah (1-3 bulan)
-3. Apakah ini mengubah thesis investasi jangka panjang?
-4. Level confidence analisis ini: TINGGI / SEDANG / RENDAH
+Untuk setiap saham jawab:
+1. Dampak jangka pendek (minggu ini)
+2. Dampak jangka menengah (1-3 bulan)
+3. Apakah thesis investasi berubah?
+4. Confidence: TINGGI / SEDANG / RENDAH
+5. Sentimen: positif / negatif / netral
+6. Aksi: Accumulate / Hold / Wait and See
 
-Jawab dalam format JSON:
+Jawab JSON saja:
 {{
- "KODE_SAHAM": {{
+ "KODE": {{
    "dampak_pendek": "...",
    "dampak_menengah": "...",
    "ubah_thesis": true/false,
    "penjelasan_thesis": "...",
-   "confidence": "TINGGI/SEDANG/RENDAH"
+   "confidence": "TINGGI/SEDANG/RENDAH",
+   "sentimen": "positif/negatif/netral",
+   "aksi": "Accumulate/Hold/Wait and See"
  }}
 }}
-
-Hanya jawab JSON, tidak ada teks lain.
 """
-
    response = client.models.generate_content(
        model="gemini-2.5-flash",
-       contents=deep_prompt,
+       contents=prompt,
        config={"max_output_tokens": 2000}
    )
-
    try:
        clean = response.text.strip().replace("```json", "").replace("```", "")
        return json.loads(clean)
@@ -222,119 +242,105 @@ Hanya jawab JSON, tidak ada teks lain.
 
 # =========================
 # AGENTIC STEP 3: Final Report
-# Gemini tulis laporan final berdasarkan semua data
 # =========================
 
-def agent_final_report(news_text, plan, deep_analysis, memory):
+def agent_final_report(news_text, plan, deep_analysis, macro, memory, today):
    saham_list = ", ".join([f"{k} ({v})" for k, v in BLUE_CHIP_SAHAM.items()])
    yesterday_sentiment = memory.get("overall_sentiment", "tidak ada data kemarin")
+   prev_score = memory.get("macro_score", "-")
 
-   report_prompt = f"""
-Kamu adalah analis saham senior BEI. Tulis laporan harian blue chip berdasarkan data berikut.
+   # Emoji sentimen makro
+   skor = macro.get("skor", 5)
+   if skor >= 7:
+       macro_emoji = "🟢"
+   elif skor >= 4:
+       macro_emoji = "🟡"
+   else:
+       macro_emoji = "🔴"
 
-SEMUA SAHAM DIPANTAU: {saham_list}
+   prompt = f"""
+Tulis laporan riset saham blue chip harian untuk Discord.
 
-FOKUS ANALISIS HARI INI: {plan.get('fokus_hari_ini')}
-KONDISI VS KEMARIN: {plan.get('kondisi_vs_kemarin')}
-RISIKO BARU: {plan.get('risiko_baru', 'tidak ada')}
+DATA:
+- Tanggal: {today}
+- Semua saham: {saham_list}
+- Fokus hari ini: {plan.get('fokus_hari_ini')}
+- Kondisi vs kemarin: {plan.get('kondisi_vs_kemarin')}
+- Rekomendasi sektor: {plan.get('rekomendasi_sektor')} — {plan.get('alasan_sektor')}
+- Risiko baru: {plan.get('risiko_baru', 'tidak ada')}
+- Skor makro: {skor}/10 ({macro.get('label')}) — {macro.get('alasan')}
+- Skor makro kemarin: {prev_score}/10
+- Sentimen kemarin: {yesterday_sentiment}
+- Analisis mendalam: {json.dumps(deep_analysis, ensure_ascii=False)}
+- Berita: {news_text}
 
-ANALISIS MENDALAM SAHAM PRIORITAS:
-{json.dumps(deep_analysis, indent=2, ensure_ascii=False)}
+FORMAT LAPORAN (ikuti persis, gunakan Discord markdown):
 
-BERITA HARI INI:
-{news_text}
+📈 **BLUE CHIP DAILY RESEARCH**
+`{today} · BEI Watchlist`
 
-SENTIMEN KEMARIN: {yesterday_sentiment}
+─────────────────────────────────
 
----
+🌍 **Kondisi Pasar**
+[3-4 kalimat ringkasan. Sebutkan perubahan vs kemarin dan arah pasar hari ini]
 
-Tulis laporan dengan format Discord markdown persis seperti ini:
+{macro_emoji} **Skor Makro · {skor}/10 · {macro.get('label')}**
+> {macro.get('alasan')}
+> *(kemarin: {prev_score}/10)*
 
-╔════════════════════════════════════╗
-　　　📈 BLUE CHIP DAILY RESEARCH
-　　　BEI Watchlist — Laporan Harian
-╚════════════════════════════════════╝
+─────────────────────────────────
 
-🌍 **KONDISI PASAR**
-▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
-[3-4 kalimat. Sebutkan perubahan vs kemarin jika ada]
+🔍 **Fokus & Strategi Hari Ini**
+Fokus · {plan.get('fokus_hari_ini')}
+Sektor · {plan.get('rekomendasi_sektor')} — {plan.get('alasan_sektor')}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+─────────────────────────────────
 
-🔍 **FOKUS ANALISIS HARI INI**
-▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
-[Jelaskan kenapa AI memilih fokus ini hari ini]
+🔬 **Analisis Prioritas**
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[Untuk setiap saham prioritas gunakan format ini:]
 
-📊 **ANALISIS MENDALAM — SAHAM PRIORITAS**
-▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+**[KODE] · [NAMA]**
+> Sentimen · 🟢/🔴/🟡 [Positif/Negatif/Netral]
+> Jangka Pendek · [1 kalimat]
+> Jangka Menengah · [1 kalimat]
+> Thesis Berubah · Ya/Tidak — [penjelasan singkat]
+> Confidence · TINGGI/SEDANG/RENDAH
+> Aksi · Accumulate/Hold/Wait and See
 
-[Untuk 3 saham prioritas, gunakan format:]
+─────────────────────────────────
 
-┌─────────────────────────────────┐
-│ 🏦 [KODE] — [NAMA]  🔬 PRIORITAS │
-└─────────────────────────────────┘
-Sentimen     : 🟢/🔴/🟡 [Positif/Negatif/Netral]
-Jangka Pendek: [dampak minggu ini]
-Jangka Menengah: [dampak 1-3 bulan]
-Thesis Berubah?: [Ya/Tidak — penjelasan singkat]
-Confidence   : 🔵 TINGGI / 🟡 SEDANG / 🔴 RENDAH
-Aksi         : ✅ Accumulate / ⏸️ Hold / ⏳ Wait and See
+📋 **Saham Lainnya**
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[Format satu baris per saham untuk 7 saham sisanya:]
+**KODE** · 🟢/🔴/🟡 · Aksi · [alasan 1 kalimat]
 
-📊 **SAHAM LAINNYA**
-▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+─────────────────────────────────
 
-[Untuk 7 saham lainnya, format ringkas:]
-
-┌─────────────────────────────┐
-│ 🏦 [KODE] — [NAMA]           │
-└─────────────────────────────┘
-Sentimen  : 🟢/🔴/🟡
-Alasan    : [1 kalimat]
-Aksi      : ✅/⏸️/⏳
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-⚠️ **RISIKO UTAMA HARI INI**
-▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+⚠️ **Risiko Hari Ini**
 ▸ [Risiko 1]
 ▸ [Risiko 2]
-▸ [Risiko 3 — tandai 🆕 jika risiko baru]
+▸ [Risiko 3 — tambahkan 🆕 jika risiko baru]
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+─────────────────────────────────
 
-💡 **INSIGHT UNTUK PEMULA**
-▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
-[1 paragraf pelajaran dari kondisi hari ini]
+💡 **Insight**
+[1 paragraf singkat pelajaran dari kondisi pasar hari ini untuk investor pemula]
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-📋 **WATCHLIST SUMMARY**
-▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
-🟢 BBCA  ·  Hold
-🟢 BBRI  ·  Hold
-[isi semua 10 saham]
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-> ⚠️ Bukan rekomendasi finansial resmi.
-> Selalu lakukan riset mandiri sebelum berinvestasi.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+─────────────────────────────────
+*Bukan rekomendasi finansial resmi · Riset mandiri tetap diperlukan*
 
 PENTING:
 - Semua 10 saham wajib muncul
-- Jangan prediksi harga pasti
 - Output harus selesai sempurna sampai baris terakhir
+- Jangan prediksi harga pasti
 """
 
    response = client.models.generate_content(
        model="gemini-2.5-flash",
-       contents=report_prompt,
+       contents=prompt,
        config={"max_output_tokens": 8192}
    )
-
    return response.text
 
 # =========================
@@ -346,65 +352,62 @@ def send_discord(text):
    total = len(chunks)
 
    for i, chunk in enumerate(chunks):
-       if i == 0:
-           payload = {"content": chunk}
-       else:
-           payload = {"content": f"*(lanjutan {i+1}/{total})*\n{chunk}"}
-
+       payload = {"content": chunk if i == 0 else f"*(lanjutan {i+1}/{total})*\n{chunk}"}
        res = requests.post(WEBHOOK_URL, json=payload)
        if res.status_code not in [200, 204]:
            print(f"Gagal kirim part {i+1}: {res.status_code}")
        else:
-           print(f"Part {i+1}/{total} terkirim.")
+           print(f"✅ Part {i+1}/{total} terkirim.")
 
 # =========================
-# MAIN AGENTIC LOOP
+# MAIN
 # =========================
 
 def main():
-   print("🤖 Agentic AI starting...")
    today = datetime.now().strftime("%Y-%m-%d")
+   print(f"🤖 Agentic AI starting — {today}")
 
-   # Load memory
    memory = load_memory()
-   print(f"📂 Memory loaded. Last run: {memory.get('last_report_date', 'never')}")
+   print(f"📂 Last run: {memory.get('last_report_date', 'never')}")
 
-   # Step 1: Fetch & filter news
    print("📰 Fetching news...")
    news_items = fetch_news()
-   relevant, general = filter_relevant_news(news_items, BLUE_CHIP_SAHAM)
+   relevant, general = filter_relevant_news(news_items)
    news_text = format_news(relevant, general)
-   print(f"✅ {len(relevant)} relevant news, {len(general)} general news found.")
+   print(f"✅ {len(relevant)} relevant, {len(general)} general news.")
 
-   # Step 2: Agent plans focus
-   print("🧠 Agent planning focus...")
+   print("📊 Scoring macro sentiment...")
+   macro = agent_macro_score(news_text)
+   print(f"📊 Macro score: {macro.get('skor')}/10 — {macro.get('label')}")
+
+   print("🧠 Planning...")
    plan = agent_plan(news_text, memory)
    print(f"📌 Focus: {plan.get('fokus_hari_ini')}")
-   print(f"📌 Priority stocks: {plan.get('saham_prioritas')}")
+   print(f"📌 Priority: {plan.get('saham_prioritas')}")
+   print(f"📌 Sector: {plan.get('rekomendasi_sektor')}")
 
-   # Step 3: Deep analysis on priority stocks
-   print("🔬 Running deep analysis...")
+   print("🔬 Deep analysis...")
    deep_analysis = agent_deep_analysis(plan.get("saham_prioritas", []), news_text)
 
-   # Step 4: Generate final report
-   print("📝 Generating final report...")
-   report = agent_final_report(news_text, plan, deep_analysis, memory)
+   print("📝 Generating report...")
+   report = agent_final_report(news_text, plan, deep_analysis, macro, memory, today)
 
-   # Step 5: Send to Discord
    print("📤 Sending to Discord...")
    send_discord(report)
 
-   # Step 6: Save memory for tomorrow
-   new_memory = {
+   save_memory({
        "last_report_date": today,
        "overall_sentiment": plan.get("kondisi_vs_kemarin"),
        "top_risks": plan.get("risiko_baru", ""),
        "last_focus": plan.get("fokus_hari_ini"),
-       "last_priority_stocks": plan.get("saham_prioritas")
-   }
-   save_memory(new_memory)
-   print(f"💾 Memory saved for tomorrow.")
-   print("✅ Agentic report sent successfully.")
+       "last_priority_stocks": plan.get("saham_prioritas"),
+       "macro_score": macro.get("skor"),
+       "macro_label": macro.get("label"),
+       "rekomendasi_sektor": plan.get("rekomendasi_sektor")
+   })
+
+   print("💾 Memory saved.")
+   print("✅ Done.")
 
 if __name__ == "__main__":
    main()

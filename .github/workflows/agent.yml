@@ -1,0 +1,30 @@
+name: Weekly Autonomous Crypto Agent
+
+on:
+  schedule:
+    # Berjalan otomatis setiap hari Minggu jam 01:00 UTC (08:00 WIB)
+    - cron: "0 1 * * 0"
+  workflow_dispatch: # Mengizinkan Anda menekan tombol 'Run workflow' secara manual di GitHub
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python Environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Execute Autonomous Agent
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python main.py

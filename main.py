@@ -3,7 +3,8 @@ import sys
 import time
 from datetime import datetime
 import requests
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 # ==========================================
 # 1. CORE CONFIGURATION
@@ -15,44 +16,38 @@ if not GEMINI_KEY or not DISCORD_URL:
     print("[FATAL ERROR] API Key atau Webhook URL tidak ditemukan di environment variables.")
     sys.exit(1)
 
-print("[INFO] Memulai Inisiasi Elite Ekosistem Auditor Agent...")
-genai.configure(api_key=GEMINI_KEY)
+print("[INFO] Memulai Inisiasi Elite Ekosistem Auditor Agent (GenAI SDK Terbaru)...")
+
+# Inisialisasi client baru sesuai standar SDK resmi Google
+client = genai.Client(api_key=GEMINI_KEY)
 
 # ==========================================
 # 2. AGENT BRAIN: MAX LEVEL INSTRUCTIONS
 # ==========================================
-model = genai.GenerativeModel(
-    model_name='gemini-1.5-pro',
-    tools="google_search_retrieval", # <--- SINTAKS BARU
-    system_instruction=(
-        "Anda adalah 'Elite Institutional Crypto Auditor' yang bertugas secara otonom. "
-        "Tugas Anda adalah melakukan riset web live dan menyusun audit laporan mingguan untuk aset Solana (SOL) dan Sui (SUI). "
-        "Laporan ini digunakan oleh investor institusional untuk menjaga strategi DCA hingga 2030.\n\n"
-        "ATURAN MUTLAK KELUARAN (OUTPUT):\n"
-        "1. WAJIB menggunakan Bahasa Indonesia formal, tajam, dan profesional.\n"
-        "2. JANGAN membandingkan Solana dan Sui. Berikan analisis mendalam secara terpisah karena keduanya di-hold secara mandiri.\n"
-        "3. SARING TOTAL SEMUA NOISE: Dilarang keras membahas harga, grafik harian, prediksi harga, atau rumor media sosial.\n"
-        "4. PRIORITASKAN SUMBER KREDIBEL: Lakukan pencarian informasi spesifik dari platform institusional seperti Messari, The Block, CoinDesk, CoinMarketCap, DefiLlama, Blockworks, serta blog resmi ekosistem terkait.\n\n"
-        "STRUKTUR LAPORAN UNTUK MASING-MASING ASET:\n"
-        "A. Adopsi Institusi & Modal: Perusahaan besar yang masuk, kemitraan strategis, tren arus dana/TVL.\n"
-        "B. Arsitektur & Update Teknis: Upgrade jaringan, peningkatan keamanan, adopsi developer.\n"
-        "C. Kewaspadaan Fundamental (Red Flags): Downtime jaringan, eksploitasi bug, tekanan regulasi yang spesifik, jadwal unlock token.\n\n"
-        "Jika tidak ada update material, tulis: 'Tidak ada pergerakan material minggu ini.'\n"
-        "Di akhir laporan, WAJIB buat daftar 'Sumber Data Utama' berupa nama situs atau domain yang Anda gunakan untuk menyusun laporan ini."
-    )
+system_instruction = (
+    "Anda adalah 'Elite Institutional Crypto Auditor' yang bertugas secara otonom. "
+    "Tugas Anda adalah melakukan riset web live dan menyusun audit laporan mingguan untuk aset Solana (SOL) dan Sui (SUI). "
+    "Laporan ini digunakan oleh investor institusional untuk menjaga strategi DCA hingga 2030.\n\n"
+    "ATURAN MUTLAK KELUARAN (OUTPUT):\n"
+    "1. WAJIB menggunakan Bahasa Indonesia formal, tajam, dan profesional.\n"
+    "2. JANGAN membandingkan Solana dan Sui. Berikan analisis mendalam secara terpisah karena keduanya di-hold secara mandiri.\n"
+    "3. SARING TOTAL SEMUA NOISE: Dilarang keras membahas harga, grafik harian, prediksi harga, atau rumor media sosial.\n"
+    "4. PRIORITASKAN SUMBER KREDIBEL: Lakukan pencarian informasi spesifik dari platform institusional seperti Messari, The Block, CoinDesk, CoinMarketCap, DefiLlama, Blockworks, serta blog resmi ekosistem terkait.\n\n"
+    "STRUKTUR LAPORAN UNTUK MASING-MASING ASET:\n"
+    "A. Adopsi Institusi & Modal: Perusahaan besar yang masuk, kemitraan strategis, tren arus dana/TVL.\n"
+    "B. Arsitektur & Update Teknis: Upgrade jaringan, peningkatan keamanan, adopsi developer.\n"
+    "C. Kewaspadaan Fundamental (Red Flags): Downtime jaringan, eksploitasi bug, tekanan regulasi yang spesifik, jadwal unlock token.\n\n"
+    "Jika tidak ada update material, tulis: 'Tidak ada pergerakan material minggu ini.'\n"
+    "Di akhir laporan, WAJIB buat daftar 'Sumber Data Utama' berupa nama situs atau domain yang Anda gunakan untuk menyusun laporan ini."
 )
 
 # ==========================================
 # 3. TEXT PAGINATION LOGIC (SMART CHUNKING)
 # ==========================================
 def split_text(text, limit=4000):
-    """
-    Memotong teks agar kompatibel dengan limit 4096 karakter Discord Embed.
-    Pemotongan diusahakan pada jeda baris (\n) agar format Markdown tidak hancur.
-    """
+    """Memotong teks agar kompatibel dengan limit 4096 karakter Discord Embed."""
     chunks = []
     while len(text) > limit:
-        # Cari jeda baris terakhir sebelum limit
         split_at = text.rfind('\n', 0, limit)
         if split_at == -1: 
             split_at = limit
@@ -74,7 +69,16 @@ research_prompt = (
 )
 
 try:
-    response = model.generate_content(research_prompt)
+    # Menggunakan model dengan suffix -latest untuk menghindari error 404
+    response = client.models.generate_content(
+        model='gemini-1.5-pro-latest',
+        contents=research_prompt,
+        config=types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            tools=[{"google_search": {}}],
+            temperature=0.2 # Diturunkan agar gaya bahasa lebih analitis dan tidak berhalusinasi
+        )
+    )
     report_content = response.text
 except Exception as e:
     print(f"[FATAL ERROR] Kegagalan sistem saat Agent melakukan riset web: {e}")

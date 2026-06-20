@@ -23,7 +23,7 @@ genai.configure(api_key=GEMINI_KEY)
 # ==========================================
 model = genai.GenerativeModel(
     model_name='gemini-1.5-pro',
-    tools=[{"google_search": {}}], 
+    tools="google_search_retrieval", # <--- SINTAKS BARU
     system_instruction=(
         "Anda adalah 'Elite Institutional Crypto Auditor' yang bertugas secara otonom. "
         "Tugas Anda adalah melakukan riset web live dan menyusun audit laporan mingguan untuk aset Solana (SOL) dan Sui (SUI). "
